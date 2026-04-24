@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DrinkEnough</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+
+    <header>
+      <div class="title">💧 DrinkEnough</div>
+      <div class="row">
+        <button class="btn" id="remindersBtn" title="Erinnerungen einstellen">🔔 Erinnerungen</button>
+        <button class="btn" id="exportBtn" title="Daten exportieren">Export</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none" />
+        <button class="btn" id="importBtn" title="Daten importieren">Import</button>
+      </div>
+    </header>
+
+    <div class="grid cols-3">
+
+      <!-- Tagesziel & Heute -->
+      <section class="card">
+        <h3 class="section-title">Tagesziel &amp; Heute</h3>
+        <div class="row" style="gap:12px">
+          <div class="grow">
+            <label for="goal">Tagesziel (ml)</label>
+            <input id="goal" type="number" min="100" step="50" class="grow" />
+          </div>
+          <div>
+            <label for="datePicker">Datum</label>
+            <input id="datePicker" type="date" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="pill" id="todayStats">0 / 0 ml • 0%</div>
+          <div class="pill">Tipp: <span class="kbd">N</span> neuer Eintrag</div>
+        </div>
+        <svg class="ring" viewBox="0 0 100 100" id="todayRing"></svg>
+        <div class="legend" id="todayLegend"></div>
+      </section>
+
+      <!-- Eintrag hinzufügen -->
+      <section class="card">
+        <h3 class="section-title">Eintrag hinzufügen</h3>
+        <div class="row">
+          <div class="grow">
+            <label for="drinkSelect">Getränk</label>
+            <select id="drinkSelect" class="grow"></select>
+          </div>
+          <div>
+            <label for="amount">Menge (ml)</label>
+            <input id="amount" type="number" min="10" step="10" value="250" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn-accent" id="addEntryBtn">➕ Hinzufügen</button>
+          <button class="btn-ghost" id="manageDrinksBtn">🥤 Getränke verwalten</button>
+        </div>
+        <hr style="border-color:rgba(255,255,255,.08);margin:14px 0" />
+        <h4 style="margin:0 0 6px 0">Letzte Einträge</h4>
+        <div class="entries" id="entriesList"></div>
+      </section>
+
+      <!-- Aufschlüsselung -->
+      <section class="card">
+        <h3 class="section-title">Aufschlüsselung (heute)</h3>
+        <div id="breakdown"></div>
+        <hr style="border-color:rgba(255,255,255,.08);margin:14px 0" />
+        <button class="btn" id="deleteDayBtn">Heutige Einträge löschen</button>
+      </section>
+
+    </div>
+
+    <div class="grid cols-2" style="margin-top:16px">
+
+      <!-- Wochenchart -->
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <h3 class="section-title">Woche</h3>
+          <div class="row">
+            <button class="btn" data-fs="week">Vollbild</button>
+            <button class="btn-ghost" id="prevWeek">◀</button>
+            <div class="pill" id="weekLabel">Diese Woche</div>
+            <button class="btn-ghost" id="nextWeek">▶</button>
+          </div>
+        </div>
+        <canvas id="weekChart" class="chart clickable" title="Klicke auf einen Tag für Details"></canvas>
+      </section>
+
+      <!-- Monatschart -->
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <h3 class="section-title">Monat</h3>
+          <div class="row">
+            <button class="btn" data-fs="month">Vollbild</button>
+            <button class="btn-ghost" id="prevMonth">◀</button>
+            <div class="pill" id="monthLabel">Dieser Monat</div>
+            <button class="btn-ghost" id="nextMonth">▶</button>
+          </div>
+        </div>
+        <canvas id="monthChart" class="chart clickable" title="Klicke auf einen Tag für Details"></canvas>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Dialog: Getränke verwalten -->
+  <dialog id="drinksDialog">
+    <form method="dialog" style="margin:0">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 style="margin:0">Getränke verwalten</h3>
+        <button class="btn-ghost" value="close">✖</button>
+      </div>
+      <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <div class="grow">
+          <label>Name</label>
+          <input id="dName" placeholder="z.B. Wasser" />
+        </div>
+        <div>
+          <label>Farbe (#)</label>
+          <input id="dColorText" placeholder="#22c55e" />
+        </div>
+        <div>
+          <label>Picker</label>
+          <input type="color" id="dColorPick" value="#22c55e" />
+        </div>
+        <div class="grow">
+          <label>Notizen</label>
+          <input id="dNotes" placeholder="z.B. still, kalt" />
+        </div>
+        <div>
+          <button class="btn-accent" id="saveDrinkBtn" type="button">Speichern</button>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <div class="tiny muted" style="margin-bottom:6px">Klick auf einen Eintrag zum Bearbeiten.</div>
+        <div id="drinksList"></div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: Vollbild-Chart -->
+  <dialog id="fsDialog">
+    <form method="dialog" style="margin:0">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 id="fsTitle" style="margin:0">Chart</h3>
+        <button class="btn-ghost" value="close">✖</button>
+      </div>
+      <canvas id="fsCanvas" class="fs-chart"></canvas>
+    </form>
+  </dialog>
+
+  <!-- Dialog: Erinnerungen -->
+  <dialog id="remindersDialog">
+    <form method="dialog" style="margin:0">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 style="margin:0">Erinnerungen</h3>
+        <button class="btn-ghost" value="close">✖</button>
+      </div>
+      <div class="grid cols-2">
+        <div class="card">
+          <div class="row">
+            <label class="grow">Aktivieren</label>
+            <input type="checkbox" id="remEnable" />
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="grow">
+              <label>Intervall (Minuten)</label>
+              <input id="remInterval" type="number" min="10" step="5" value="60" />
+            </div>
+            <div class="grow">
+              <label>Snooze (Minuten)</label>
+              <input id="remSnooze" type="number" min="5" step="5" value="15" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="grow">
+              <label>Aktive Stunden (Start)</label>
+              <input id="remStart" type="time" value="08:00" />
+            </div>
+            <div class="grow">
+              <label>Aktive Stunden (Ende)</label>
+              <input id="remEnd" type="time" value="21:00" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="grow">
+              <label>Nach letzter Trinkaktion pausieren (Min.)</label>
+              <input id="remPauseAfterDrink" type="number" min="0" step="5" value="30" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="grow">
+              <label>Nachrichten-Text</label>
+              <input id="remMsg" placeholder="Zeit für einen Schluck! 💧" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <label class="grow">Ton abspielen</label>
+            <input type="checkbox" id="remSound" checked />
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn-accent" id="remSaveBtn" type="button">Speichern</button>
+            <button class="btn" id="remTestBtn" type="button">Jetzt testen</button>
+            <div class="pill" id="remStatus">–</div>
+          </div>
+          <p class="tiny muted" style="margin-top:10px">
+            Hinweis: Benachrichtigungen funktionieren zuverlässig, solange die Seite geöffnet ist.
+            Für echte Push-Mitteilungen im Hintergrund muss die Seite als PWA installiert und
+            Browser-Benachrichtigungen erlaubt sein. iOS unterstützt Web-Push nur für installierte
+            Web-Apps (Homescreen) ab iOS 16.4.
+          </p>
+        </div>
+        <div class="card">
+          <h4 class="section-title">Geplante Zeiten (optional)</h4>
+          <p class="tiny muted">
+            Füge feste Uhrzeiten hinzu (z. B. 10:30, 12:00, 15:00).
+            Es wird nur innerhalb der aktiven Stunden erinnert.
+          </p>
+          <div class="row">
+            <input id="remTimesInput" class="grow" placeholder="10:30, 12:00, 15:00" />
+            <button class="btn" id="remApplyTimes" type="button">Übernehmen</button>
+          </div>
+          <div id="remTimesList" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

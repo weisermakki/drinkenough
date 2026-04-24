@@ -1,18 +1,25 @@
 export const Brand = {
-  primary: '#1A73E8',
-  primaryLight: '#5BB8F5',
-  gradient: ['#5BB8F5', '#1A73E8'] as const,
+  primary: '#38b8eb',
+  primaryDark: '#2a9fd4',
+  shadow: '#384deb',
+  success: '#58cc02',
+  successDark: '#46a302',
+  warning: '#ffc800',
 
-  background: '#FFFFFF',
-  surface: '#F5F8FC',
+  background: '#ffffff',
+  surface: '#f7f9fc',
+  selectedBg: '#e8f7fd',
 
-  text: '#11181C',
-  textMuted: '#687076',
-  textSubtle: '#9BA1A6',
+  text: '#1a2340',
+  textMuted: '#9aa5b8',
+  textSubtle: '#9aa5b8',
 
-  border: '#E1E7EF',
-  inputBackground: '#F5F8FC',
+  border: '#e8edf5',
+  inputBackground: '#f7f9fc',
+
+  // auth gradient (kept for PrimaryButton)
+  primaryLight: '#7dd8f5',
+  gradient: ['#7dd8f5', '#38b8eb'] as const,
 
   error: '#D93025',
-  success: '#1E8E3E',
 } as const;

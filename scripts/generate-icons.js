@@ -86,10 +86,10 @@ function savePNG(filename, transform) {
 
 // ── icon variants ──────────────────────────────────────────────────────────
 
-// 1. icon.png – weißer Hintergrund (Expo Standard)
+// 1. icon.png – hellblauer Hintergrund für iOS (kein Transparenz-Support)
 savePNG('icon.png', (p) =>
   isWhiteBg(p)
-    ? { r: 255, g: 255, b: 255, a: 255 }
+    ? { r: BG.r, g: BG.g, b: BG.b, a: 255 }
     : { r: p.r, g: p.g, b: p.b, a: 255 }
 );
 
@@ -100,7 +100,7 @@ savePNG('android-icon-foreground.png', (p) =>
     : { r: p.r, g: p.g, b: p.b, a: 255 }
 );
 
-// 3. android-icon-background.png – Vollfarbe #E6F4FE
+// 3. android-icon-background.png – Vollfarbe #E6F4FE (hellblau)
 savePNG('android-icon-background.png', () => ({
   r: BG.r, g: BG.g, b: BG.b, a: 255,
 }));
@@ -112,17 +112,17 @@ savePNG('android-icon-monochrome.png', (p) =>
     : { r: 255, g: 255, b: 255, a: 255 }
 );
 
-// 5. splash-icon.png – weißer Hintergrund
+// 5. splash-icon.png – hellblauer Hintergrund
 savePNG('splash-icon.png', (p) =>
   isWhiteBg(p)
-    ? { r: 255, g: 255, b: 255, a: 255 }
+    ? { r: BG.r, g: BG.g, b: BG.b, a: 255 }
     : { r: p.r, g: p.g, b: p.b, a: 255 }
 );
 
-// 6. favicon.png – weißer Hintergrund
+// 6. favicon.png – transparenter Hintergrund für Web
 savePNG('favicon.png', (p) =>
   isWhiteBg(p)
-    ? { r: 255, g: 255, b: 255, a: 255 }
+    ? { r: 0, g: 0, b: 0, a: 0 }
     : { r: p.r, g: p.g, b: p.b, a: 255 }
 );
 

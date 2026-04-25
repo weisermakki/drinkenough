@@ -1,5 +1,6 @@
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Brand } from '@/constants/brand';
@@ -31,43 +32,151 @@ function getLevel(score: number) {
   return { level: 1, name: 'Wassertropfen', currentXp: score, neededXp: 100, nextName: 'Hydro-Starter' };
 }
 
-function getDayLabel(offsetFromMonday: number) {
-  const days = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-  return days[offsetFromMonday];
+const DAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const GOAL = 2000;
+
+type DayData = {
+  label: string;
+  ml: number;
+  isFuture: boolean;
+  isToday: boolean;
+};
+
+function DashedLine({ color }: { color: string }) {
+  return (
+    <View style={{ flexDirection: 'row', flex: 1, overflow: 'hidden', height: 2 }}>
+      {Array.from({ length: 60 }).map((_, i) => (
+        <View key={i} style={{ width: 5, height: 2, backgroundColor: color, marginRight: 3 }} />
+      ))}
+    </View>
+  );
 }
 
-// Build a fake weekly dataset: last 7 days ending today
-function buildWeekData(todayMl: number) {
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon...
-  const mondayOffset = (dayOfWeek + 6) % 7; // 0=Mon
-  const mockMl = [1800, 2100, 950, 2000, 1600, 2300, todayMl];
+function WeekChart({
+  data,
+  chartH,
+  maxMl,
+  avgMl,
+  onBarPress,
+}: {
+  data: DayData[];
+  chartH: number;
+  maxMl: number;
+  avgMl: number;
+  onBarPress?: (d: DayData) => void;
+}) {
+  const avgBottom = maxMl > 0 ? (avgMl / maxMl) * chartH : 0;
 
-  return Array.from({ length: 7 }, (_, i) => {
-    const isFuture = i > mondayOffset;
-    const isToday = i === mondayOffset;
-    return {
-      label: getDayLabel(i),
-      ml: isFuture ? 0 : mockMl[i],
-      isFuture,
-      isToday,
-    };
-  });
+  return (
+    <View>
+      <View style={{ height: chartH, position: 'relative' }}>
+        {/* Balken */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'flex-end',
+            height: chartH,
+            gap: 6,
+            position: 'absolute',
+            left: 0,
+            right: 0,
+          }}>
+          {data.map((day) => {
+            const barH = day.isFuture
+              ? 0
+              : day.ml === 0
+                ? 4
+                : Math.max((day.ml / maxMl) * chartH, 8);
+            const bgColor = !day.isFuture && day.ml > 0 ? Brand.primary : Brand.border;
+            const opacity = day.isFuture ? 0.2 : day.ml === 0 ? 0.4 : day.ml >= GOAL ? 1 : 0.55;
+
+            const bar = (
+              <View
+                style={{ width: '100%', height: barH, backgroundColor: bgColor, opacity, borderRadius: 6 }}
+              />
+            );
+
+            return onBarPress ? (
+              <TouchableOpacity
+                key={day.label}
+                style={{ flex: 1, height: chartH, justifyContent: 'flex-end' }}
+                onPress={() => onBarPress(day)}
+                activeOpacity={0.7}>
+                {bar}
+              </TouchableOpacity>
+            ) : (
+              <View key={day.label} style={{ flex: 1, height: chartH, justifyContent: 'flex-end' }}>
+                {bar}
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Gestrichelte Durchschnitts-Linie */}
+        {avgMl > 0 && (
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: Math.max(Math.round(avgBottom) - 1, 0),
+              height: 2,
+              flexDirection: 'row',
+            }}
+            pointerEvents="none">
+            <DashedLine color={Brand.warning} />
+          </View>
+        )}
+      </View>
+
+      {/* Tagesbeschriftungen */}
+      <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+        {data.map((day) => (
+          <Text
+            key={day.label}
+            style={{
+              flex: 1,
+              textAlign: 'center',
+              fontSize: 10,
+              fontWeight: '700',
+              color: day.isToday ? Brand.primary : Brand.textMuted,
+            }}>
+            {day.label}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
 }
 
 export default function ProfilScreen() {
-  const { score, streak, totalWaterMl, logs } = useWater();
+  const { score, streak, totalWaterMl, weeklyMl } = useWater();
   const { session, signOut } = useAuth();
+
+  const [chartModal, setChartModal] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<DayData | null>(null);
 
   const levelInfo = getLevel(score);
   const xpPct = Math.min(levelInfo.currentXp / levelInfo.neededXp, 1);
-  const weekData = buildWeekData(totalWaterMl);
-  const maxMl = Math.max(...weekData.map((d) => d.ml), 1);
   const daysActive = Math.max(streak, 1);
-
   const email = session?.user?.email ?? '';
   const name = email.split('@')[0];
   const totalLiters = (totalWaterMl / 1000).toFixed(1);
+
+  const todayDayIdx = (new Date().getDay() + 6) % 7;
+  const weekData: DayData[] = weeklyMl.map((ml, i) => ({
+    label: DAY_LABELS[i],
+    ml: i > todayDayIdx ? 0 : ml,
+    isFuture: i > todayDayIdx,
+    isToday: i === todayDayIdx,
+  }));
+
+  const nonFuture = weekData.filter((d) => !d.isFuture);
+  const avgMl =
+    nonFuture.length > 0
+      ? Math.round(nonFuture.reduce((s, d) => s + d.ml, 0) / nonFuture.length)
+      : 0;
+  const maxMl = Math.max(...weekData.map((d) => d.ml), 500);
 
   async function handleSignOut() {
     try {
@@ -80,7 +189,7 @@ export default function ProfilScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Profile Header */}
+        {/* Profil-Header */}
         <LinearGradient
           colors={['#e8f7fd', '#f0f0ff']}
           start={{ x: 0, y: 0 }}
@@ -100,7 +209,7 @@ export default function ProfilScreen() {
           </TouchableOpacity>
         </LinearGradient>
 
-        {/* Stats Row */}
+        {/* Stats-Reihe */}
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Text style={styles.statVal}>🔥 {streak}</Text>
@@ -120,7 +229,7 @@ export default function ProfilScreen() {
           </View>
         </View>
 
-        {/* Level Card */}
+        {/* Level-Karte */}
         <View style={styles.levelCard}>
           <Text style={styles.levelTitle}>LEVEL</Text>
           <Text style={styles.levelName}>
@@ -137,40 +246,95 @@ export default function ProfilScreen() {
           <View style={styles.xpLabels}>
             <Text style={styles.xpLbl}>{levelInfo.currentXp} XP</Text>
             {levelInfo.nextName && (
-              <Text style={styles.xpLbl}>{levelInfo.neededXp} XP für Level {levelInfo.level + 1}</Text>
+              <Text style={styles.xpLbl}>
+                {levelInfo.neededXp} XP für Level {levelInfo.level + 1}
+              </Text>
             )}
           </View>
         </View>
 
-        {/* Weekly Chart */}
-        <View style={styles.weeklyCard}>
-          <Text style={styles.weeklyTitle}>DIESE WOCHE</Text>
-          <View style={styles.dayBars}>
-            {weekData.map((day) => {
-              const barH = day.isFuture ? 0 : (day.ml / maxMl) * 60;
-              return (
-                <View key={day.label} style={styles.dayBarWrap}>
-                  <View
-                    style={[
-                      styles.dayBar,
-                      {
-                        height: Math.max(barH, 4),
-                        backgroundColor: day.isFuture ? Brand.border : Brand.primary,
-                        opacity: day.isFuture ? 1 : day.ml >= 2000 ? 1 : 0.45,
-                      },
-                    ]}
-                  />
-                  <Text style={[styles.dayLbl, day.isToday && { color: Brand.primary }]}>
-                    {day.label}
-                  </Text>
-                </View>
-              );
-            })}
+        {/* Wochen-Graph (antippbar) */}
+        <TouchableOpacity
+          style={styles.weeklyCard}
+          onPress={() => {
+            setSelectedDay(null);
+            setChartModal(true);
+          }}
+          activeOpacity={0.85}>
+          <View style={styles.weeklyCardHeader}>
+            <Text style={styles.weeklyTitle}>DIESE WOCHE</Text>
+            <View style={styles.avgLegend}>
+              <View style={styles.avgDashSample}>
+                <DashedLine color={Brand.warning} />
+              </View>
+              <Text style={styles.avgLegendText}>⌀ {avgMl} ml</Text>
+            </View>
           </View>
-        </View>
+          <WeekChart data={weekData} chartH={80} maxMl={maxMl} avgMl={avgMl} />
+          <Text style={styles.tapHint}>Tippen für Detailansicht →</Text>
+        </TouchableOpacity>
 
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      {/* Detail-Modal */}
+      <Modal
+        visible={chartModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setChartModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Diese Woche</Text>
+              <TouchableOpacity onPress={() => setChartModal(false)} style={styles.modalClose}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Durchschnitts-Legende */}
+            <View style={styles.modalAvgRow}>
+              <View style={styles.modalAvgDash}>
+                <DashedLine color={Brand.warning} />
+              </View>
+              <Text style={styles.modalAvgText}>Wochendurchschnitt: {avgMl} ml/Tag</Text>
+            </View>
+
+            {/* Großer Graph */}
+            <WeekChart
+              data={weekData}
+              chartH={180}
+              maxMl={maxMl}
+              avgMl={avgMl}
+              onBarPress={setSelectedDay}
+            />
+
+            {/* Tages-Detail */}
+            {selectedDay ? (
+              <View style={styles.dayDetailCard}>
+                <Text style={styles.dayDetailDay}>{selectedDay.label}</Text>
+                <Text style={styles.dayDetailMl}>
+                  {selectedDay.isFuture
+                    ? '–'
+                    : selectedDay.ml === 0
+                      ? 'Nichts getrunken'
+                      : `${selectedDay.ml} ml`}
+                </Text>
+                {!selectedDay.isFuture && selectedDay.ml > 0 && (
+                  <Text style={styles.dayDetailGoal}>
+                    {selectedDay.ml >= GOAL
+                      ? '✓ Tagesziel erreicht'
+                      : `Noch ${GOAL - selectedDay.ml} ml bis zum Ziel`}
+                  </Text>
+                )}
+              </View>
+            ) : (
+              <Text style={styles.tapHintModal}>Tippe auf einen Balken für Details</Text>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -249,21 +413,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   levelName: { fontSize: 18, fontWeight: '900', color: Brand.text, marginBottom: 12 },
-  xpBarBg: {
-    height: 14,
-    backgroundColor: Brand.border,
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  xpBarFill: {
-    height: '100%',
-    borderRadius: 20,
-  },
-  xpLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
-  },
+  xpBarBg: { height: 14, backgroundColor: Brand.border, borderRadius: 20, overflow: 'hidden' },
+  xpBarFill: { height: '100%', borderRadius: 20 },
+  xpLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
   xpLbl: { fontSize: 11, fontWeight: '700', color: Brand.textMuted },
 
   weeklyCard: {
@@ -274,27 +426,94 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
   },
+  weeklyCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
   weeklyTitle: {
     fontSize: 11,
     fontWeight: '800',
     color: Brand.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
-    marginBottom: 14,
   },
-  dayBars: {
-    flexDirection: 'row',
-    gap: 6,
-    alignItems: 'flex-end',
-    height: 80,
+  avgLegend: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  avgDashSample: { width: 20, overflow: 'hidden', height: 2 },
+  avgLegendText: { fontSize: 11, fontWeight: '700', color: Brand.warning },
+  tapHint: {
+    fontSize: 11,
+    color: Brand.textMuted,
+    fontWeight: '600',
+    textAlign: 'right',
+    marginTop: 10,
   },
-  dayBarWrap: {
+
+  // Modal
+  modalOverlay: {
     flex: 1,
-    alignItems: 'center',
-    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'flex-end',
-    height: '100%',
   },
-  dayBar: { width: '100%', borderRadius: 6 },
-  dayLbl: { fontSize: 10, fontWeight: '700', color: Brand.textMuted },
+  modalBox: {
+    backgroundColor: Brand.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalTitle: { fontSize: 20, fontWeight: '900', color: Brand.text },
+  modalClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Brand.surface,
+    borderWidth: 2,
+    borderColor: Brand.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCloseText: { fontSize: 14, fontWeight: '700', color: Brand.textMuted },
+
+  modalAvgRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  modalAvgDash: { width: 28, overflow: 'hidden', height: 2 },
+  modalAvgText: { fontSize: 12, fontWeight: '700', color: Brand.warning },
+
+  dayDetailCard: {
+    marginTop: 16,
+    backgroundColor: Brand.selectedBg,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: Brand.primary + '40',
+    padding: 16,
+    alignItems: 'center',
+  },
+  dayDetailDay: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Brand.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  dayDetailMl: { fontSize: 30, fontWeight: '900', color: Brand.primary, marginTop: 4 },
+  dayDetailGoal: { fontSize: 12, fontWeight: '700', color: Brand.textMuted, marginTop: 4 },
+  tapHintModal: {
+    fontSize: 12,
+    color: Brand.textMuted,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 20,
+  },
 });

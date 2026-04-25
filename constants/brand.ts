@@ -1,7 +1,7 @@
 export const Brand = {
   primary: '#38b8eb',
   primaryDark: '#2a9fd4',
-  shadow: '#384deb',
+  shadow: '#1482b8',
   success: '#58cc02',
   successDark: '#46a302',
   warning: '#ffc800',

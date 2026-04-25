@@ -7,7 +7,20 @@
       "Bash(npm install *)",
       "Bash(npx tsc *)",
       "Bash(rm -f app/modal.tsx 'app/\\(tabs\\)/explore.tsx' components/hello-wave.tsx components/haptic-tab.tsx components/parallax-scroll-view.tsx components/external-link.tsx components/themed-text.tsx components/themed-view.tsx components/ui/collapsible.tsx components/ui/icon-symbol.tsx components/ui/icon-symbol.ios.tsx hooks/use-theme-color.ts constants/theme.ts scripts/reset-project.js)",
-      "Bash(rmdir components/ui scripts)"
+      "Bash(rmdir components/ui scripts)",
+      "Bash(python3 -c \"import PIL; print\\('Pillow OK'\\)\")",
+      "Bash(python3 -c \"from PIL import Image; print\\('PIL OK'\\)\")",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(/c/Users/maxsc/AppData/Local/Microsoft/WindowsApps/python3 *)",
+      "Bash(node -e \"require\\('canvas'\\)\")",
+      "Bash(node -e \"require\\('sharp'\\)\")",
+      "Bash(node -e \"require\\('jimp'\\)\")",
+      "Bash(npm list *)",
+      "Bash(npx --yes @squoosh/cli --version)",
+      "Bash(node -e \"require\\('pngjs'\\)\")",
+      "Bash(node -e \"require\\('zlib'\\)\")",
+      "Bash(node scripts/generate-icons.js)"
     ]
   }
 }

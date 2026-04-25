@@ -63,11 +63,7 @@ function RootNavigator() {
         name="hinzufuegen"
         options={{
           presentation: 'modal',
-          headerShown: true,
-          title: 'Getränk hinzufügen',
-          headerTitleStyle: { fontWeight: '800', fontSize: 17 },
-          headerStyle: { backgroundColor: Brand.background },
-          headerTintColor: Brand.primary,
+          headerShown: false,
         }}
       />
     </Stack>

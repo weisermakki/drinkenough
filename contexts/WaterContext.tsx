@@ -45,6 +45,7 @@ type WaterState = {
   goalReached: boolean;
   showSuccess: boolean;
   isLoading: boolean;
+  weeklyMl: number[]; // 7 Werte: Mo=0 … So=6
   addLog: (name: string, emoji: string, ml: number, waterMl: number, time: string) => Promise<void>;
   dismissSuccess: () => void;
 };
@@ -58,6 +59,14 @@ function todayStr() {
 
 function todayMidnightISO() {
   const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function mondayMidnightISO() {
+  const d = new Date();
+  const diff = (d.getDay() + 6) % 7; // Tage seit Montag
+  d.setDate(d.getDate() - diff);
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
 }
@@ -79,6 +88,7 @@ export function WaterProvider({ children }: { children: ReactNode }) {
   const [score, setScore]             = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isLoading, setIsLoading]     = useState(true);
+  const [weeklyMl, setWeeklyMl]       = useState<number[]>(new Array(7).fill(0));
 
   // Refs für addLog (vermeiden veraltete Closure-Werte)
   const goalRewardedRef  = useRef(false);
@@ -107,6 +117,7 @@ export function WaterProvider({ children }: { children: ReactNode }) {
         await Promise.all([
           fetchTodayLogs(userId),
           fetchUserStats(userId),
+          fetchWeekData(userId),
         ]);
       } catch (e) {
         console.warn('WaterContext init:', e);
@@ -230,6 +241,25 @@ export function WaterProvider({ children }: { children: ReactNode }) {
     setScore(data.score ?? 0);
   }
 
+  // ─── Wochendaten für den Graphen ──────────────────────────────────
+  async function fetchWeekData(uid: string) {
+    const { data, error } = await supabase
+      .from('Getränke')
+      .select('menge_ml, uhrzeit, artid')
+      .eq('userid', uid)
+      .gte('uhrzeit', mondayMidnightISO());
+    if (error) throw error;
+    const daily = new Array(7).fill(0);
+    for (const row of data ?? []) {
+      const date = new Date(row.uhrzeit);
+      const dayIdx = (date.getDay() + 6) % 7; // Mo=0 … So=6
+      const name = artNameById.current.get(row.artid) ?? 'Wasser';
+      const meta = getDrinkMeta(name);
+      daily[dayIdx] += Math.round(row.menge_ml * meta.factor);
+    }
+    setWeeklyMl(daily);
+  }
+
   // ─── addLog ───────────────────────────────────────────────────────
   const addLog = useCallback(
     async (name: string, emoji: string, ml: number, waterMl: number, time: string) => {
@@ -294,6 +324,13 @@ export function WaterProvider({ children }: { children: ReactNode }) {
       setStreak(newStreak);
       setScore(newScore);
       if (goalJustReached) setShowSuccess(true);
+
+      const todayIdx = (new Date().getDay() + 6) % 7;
+      setWeeklyMl((prev) => {
+        const next = [...prev];
+        next[todayIdx] = (next[todayIdx] ?? 0) + waterMl;
+        return next;
+      });
     },
     [userId],
   );
@@ -313,10 +350,11 @@ export function WaterProvider({ children }: { children: ReactNode }) {
       goalReached,
       showSuccess,
       isLoading,
+      weeklyMl,
       addLog,
       dismissSuccess,
     }),
-    [logs, totalWaterMl, streak, score, goalReached, showSuccess, isLoading, addLog, dismissSuccess],
+    [logs, totalWaterMl, streak, score, goalReached, showSuccess, isLoading, weeklyMl, addLog, dismissSuccess],
   );
 
   return <WaterContext.Provider value={value}>{children}</WaterContext.Provider>;

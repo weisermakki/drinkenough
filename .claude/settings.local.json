@@ -20,7 +20,8 @@
       "Bash(npx --yes @squoosh/cli --version)",
       "Bash(node -e \"require\\('pngjs'\\)\")",
       "Bash(node -e \"require\\('zlib'\\)\")",
-      "Bash(node scripts/generate-icons.js)"
+      "Bash(node scripts/generate-icons.js)",
+      "Bash(node *)"
     ]
   }
 }

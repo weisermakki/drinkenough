@@ -1,163 +1,129 @@
-// Generates water drop icons for DrinkEnough using pngjs (no extra deps)
+// Generates all app icons from assets/images/tropfen.png using pngjs
 const { PNG } = require('pngjs');
 const fs = require('fs');
 const path = require('path');
 
+const OUT  = path.join(__dirname, '..', 'assets', 'images');
+const SRC  = path.join(OUT, 'tropfen.png');
 const SIZE = 1024;
-const OUT = path.join(__dirname, '..', 'assets', 'images');
 
-// Drop geometry (tuned for 1024x1024)
-const CX    = SIZE / 2;   // 512 – horizontal center
-const TIP_Y = 90;         // top point of the drop
-const CY    = 668;        // center of the round base
-const CR    = 262;        // radius of the round base
+// Brand background color for Android adaptive icon
+const BG = { r: 230, g: 244, b: 254 }; // #E6F4FE
 
-// Brand colors
-const PRIMARY   = { r: 56,  g: 184, b: 235 }; // #38b8eb
-const LIGHT     = { r: 125, g: 216, b: 245 }; // #7dd8f5
-const DARK      = { r: 42,  g: 159, b: 212 }; // #2a9fd4
-const BG_LIGHT  = { r: 230, g: 244, b: 254 }; // #E6F4FE (android bg)
+// ── load source ────────────────────────────────────────────────────────────
 
-// ── shape ──────────────────────────────────────────────────────────────────
+const srcBuf = fs.readFileSync(SRC);
+const src = PNG.sync.read(srcBuf);
+const SW = src.width;
+const SH = src.height;
 
-function insideDrop(px, py) {
-  const x = px - CX;
-
-  // Round base (lower circle)
-  const dy = py - CY;
-  if (x * x + dy * dy <= CR * CR) return true;
-
-  // Upper tapered region
-  if (py < TIP_Y || py > CY) return false;
-  const t = (py - TIP_Y) / (CY - TIP_Y); // 0 at tip, 1 at circle center
-  const halfW = CR * Math.pow(t, 0.52);   // smooth power taper
-  return Math.abs(x) < halfW;
-}
-
-// 2×2 super-sampling → smooth edges
-function coverage(px, py) {
-  let hits = 0;
-  for (let sy = 0; sy < 2; sy++)
-    for (let sx = 0; sx < 2; sx++)
-      if (insideDrop(px + sx * 0.5, py + sy * 0.5)) hits++;
-  return hits / 4;
-}
-
-// ── color ──────────────────────────────────────────────────────────────────
-
-function dropColor(px, py) {
-  // Vertical gradient: LIGHT at top, PRIMARY in middle, DARK at bottom
-  const dropH = CY + CR - TIP_Y;
-  const t = Math.max(0, Math.min(1, (py - TIP_Y) / dropH));
-
-  let r, g, b;
-  if (t < 0.45) {
-    const u = t / 0.45;
-    r = LIGHT.r + (PRIMARY.r - LIGHT.r) * u;
-    g = LIGHT.g + (PRIMARY.g - LIGHT.g) * u;
-    b = LIGHT.b + (PRIMARY.b - LIGHT.b) * u;
-  } else {
-    const u = (t - 0.45) / 0.55;
-    r = PRIMARY.r + (DARK.r - PRIMARY.r) * u;
-    g = PRIMARY.g + (DARK.g - PRIMARY.g) * u;
-    b = PRIMARY.b + (DARK.b - PRIMARY.b) * u;
-  }
-
-  // White specular highlight (upper-left area)
-  const hx = px - (CX - CR * 0.32);
-  const hy = py - (TIP_Y + (CY - TIP_Y) * 0.28);
-  const hd2 = (hx * hx + hy * hy) / (CR * CR * 0.12);
-  const highlight = Math.max(0, 1 - hd2) * 0.55;
-
+function srcPixel(sx, sy) {
+  sx = Math.max(0, Math.min(SW - 1, Math.round(sx)));
+  sy = Math.max(0, Math.min(SH - 1, Math.round(sy)));
+  const i = (sy * SW + sx) * 4;
   return {
-    r: Math.min(255, r + (255 - r) * highlight),
-    g: Math.min(255, g + (255 - g) * highlight),
-    b: Math.min(255, b + (255 - b) * highlight),
+    r: src.data[i],
+    g: src.data[i + 1],
+    b: src.data[i + 2],
+    a: src.data[i + 3],
   };
 }
 
-// ── PNG helpers ────────────────────────────────────────────────────────────
+// Bilinear interpolation from source into SIZE×SIZE
+function sample(dx, dy) {
+  const fx = (dx / SIZE) * SW;
+  const fy = (dy / SIZE) * SH;
+  const x0 = Math.floor(fx), x1 = Math.min(SW - 1, x0 + 1);
+  const y0 = Math.floor(fy), y1 = Math.min(SH - 1, y0 + 1);
+  const tx = fx - x0, ty = fy - y0;
 
-function makePNG(getPixel) {
+  const p00 = srcPixel(x0, y0);
+  const p10 = srcPixel(x1, y0);
+  const p01 = srcPixel(x0, y1);
+  const p11 = srcPixel(x1, y1);
+
+  return {
+    r: (1-tx)*(1-ty)*p00.r + tx*(1-ty)*p10.r + (1-tx)*ty*p01.r + tx*ty*p11.r,
+    g: (1-tx)*(1-ty)*p00.g + tx*(1-ty)*p10.g + (1-tx)*ty*p01.g + tx*ty*p11.g,
+    b: (1-tx)*(1-ty)*p00.b + tx*(1-ty)*p10.b + (1-tx)*ty*p01.b + tx*ty*p11.b,
+    a: (1-tx)*(1-ty)*p00.a + tx*(1-ty)*p10.a + (1-tx)*ty*p01.a + tx*ty*p11.a,
+  };
+}
+
+// Detect if a pixel is "background white" (outer white area of the source image).
+// Uses brightness + distance-from-source-alpha for images with existing alpha,
+// or a simple white-detection heuristic for fully opaque sources.
+function isWhiteBg(p) {
+  // If source already has alpha channel, trust it
+  if (p.a < 200) return true;
+  // Otherwise: very bright, low saturation → treat as white background
+  const brightness = (p.r + p.g + p.b) / 3;
+  const maxC = Math.max(p.r, p.g, p.b);
+  const minC = Math.min(p.r, p.g, p.b);
+  const saturation = maxC === 0 ? 0 : (maxC - minC) / maxC;
+  return brightness > 245 && saturation < 0.06;
+}
+
+// ── PNG builder ────────────────────────────────────────────────────────────
+
+function savePNG(filename, transform) {
   const png = new PNG({ width: SIZE, height: SIZE });
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
+      const p = sample(x, y);
+      const out = transform(p, x, y);
       const i = (y * SIZE + x) * 4;
-      const { r, g, b, a } = getPixel(x, y);
-      png.data[i]     = Math.round(r);
-      png.data[i + 1] = Math.round(g);
-      png.data[i + 2] = Math.round(b);
-      png.data[i + 3] = Math.round(a);
+      png.data[i]     = Math.round(Math.max(0, Math.min(255, out.r)));
+      png.data[i + 1] = Math.round(Math.max(0, Math.min(255, out.g)));
+      png.data[i + 2] = Math.round(Math.max(0, Math.min(255, out.b)));
+      png.data[i + 3] = Math.round(Math.max(0, Math.min(255, out.a)));
     }
   }
-  return PNG.sync.write(png);
-}
-
-function savePNG(filename, getPixel) {
-  const buf = makePNG(getPixel);
-  const p = path.join(OUT, filename);
-  fs.writeFileSync(p, buf);
-  console.log('wrote', p);
+  const outPath = path.join(OUT, filename);
+  fs.writeFileSync(outPath, PNG.sync.write(png));
+  console.log('wrote', outPath);
 }
 
 // ── icon variants ──────────────────────────────────────────────────────────
 
-// 1. Main icon – white background + drop
-savePNG('icon.png', (x, y) => {
-  const c = coverage(x, y);
-  if (c === 0) return { r: 255, g: 255, b: 255, a: 255 };
-  const dc = dropColor(x, y);
-  return {
-    r: dc.r * c + 255 * (1 - c),
-    g: dc.g * c + 255 * (1 - c),
-    b: dc.b * c + 255 * (1 - c),
-    a: 255,
-  };
-});
+// 1. icon.png – weißer Hintergrund (Expo Standard)
+savePNG('icon.png', (p) =>
+  isWhiteBg(p)
+    ? { r: 255, g: 255, b: 255, a: 255 }
+    : { r: p.r, g: p.g, b: p.b, a: 255 }
+);
 
-// 2. Android foreground – transparent bg, drop shape
-savePNG('android-icon-foreground.png', (x, y) => {
-  const c = coverage(x, y);
-  if (c === 0) return { r: 0, g: 0, b: 0, a: 0 };
-  const dc = dropColor(x, y);
-  return { r: dc.r, g: dc.g, b: dc.b, a: Math.round(255 * c) };
-});
+// 2. android-icon-foreground.png – transparenter Hintergrund, Tropfen bleibt
+savePNG('android-icon-foreground.png', (p) =>
+  isWhiteBg(p)
+    ? { r: 0, g: 0, b: 0, a: 0 }
+    : { r: p.r, g: p.g, b: p.b, a: 255 }
+);
 
-// 3. Android background – solid brand light
+// 3. android-icon-background.png – Vollfarbe #E6F4FE
 savePNG('android-icon-background.png', () => ({
-  r: BG_LIGHT.r, g: BG_LIGHT.g, b: BG_LIGHT.b, a: 255,
+  r: BG.r, g: BG.g, b: BG.b, a: 255,
 }));
 
-// 4. Android monochrome – transparent bg, white drop
-savePNG('android-icon-monochrome.png', (x, y) => {
-  const c = coverage(x, y);
-  return { r: 255, g: 255, b: 255, a: Math.round(255 * c) };
-});
+// 4. android-icon-monochrome.png – weißer Tropfen, transparent
+savePNG('android-icon-monochrome.png', (p) =>
+  isWhiteBg(p)
+    ? { r: 255, g: 255, b: 255, a: 0 }
+    : { r: 255, g: 255, b: 255, a: 255 }
+);
 
-// 5. Splash icon – white background + drop (same as main icon)
-savePNG('splash-icon.png', (x, y) => {
-  const c = coverage(x, y);
-  if (c === 0) return { r: 255, g: 255, b: 255, a: 255 };
-  const dc = dropColor(x, y);
-  return {
-    r: dc.r * c + 255 * (1 - c),
-    g: dc.g * c + 255 * (1 - c),
-    b: dc.b * c + 255 * (1 - c),
-    a: 255,
-  };
-});
+// 5. splash-icon.png – weißer Hintergrund
+savePNG('splash-icon.png', (p) =>
+  isWhiteBg(p)
+    ? { r: 255, g: 255, b: 255, a: 255 }
+    : { r: p.r, g: p.g, b: p.b, a: 255 }
+);
 
-// 6. Favicon – white background + drop (same as main icon)
-savePNG('favicon.png', (x, y) => {
-  const c = coverage(x, y);
-  if (c === 0) return { r: 255, g: 255, b: 255, a: 255 };
-  const dc = dropColor(x, y);
-  return {
-    r: dc.r * c + 255 * (1 - c),
-    g: dc.g * c + 255 * (1 - c),
-    b: dc.b * c + 255 * (1 - c),
-    a: 255,
-  };
-});
+// 6. favicon.png – weißer Hintergrund
+savePNG('favicon.png', (p) =>
+  isWhiteBg(p)
+    ? { r: 255, g: 255, b: 255, a: 255 }
+    : { r: p.r, g: p.g, b: p.b, a: 255 }
+);
 
 console.log('Done.');

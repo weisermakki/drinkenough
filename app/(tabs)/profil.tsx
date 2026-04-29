@@ -1,6 +1,6 @@
 import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Brand } from '@/constants/brand';
@@ -149,12 +149,33 @@ function WeekChart({
   );
 }
 
+function getWeekLabel(offset: number): string {
+  if (offset === 0) return 'Diese Woche';
+  if (offset === -1) return 'Letzte Woche';
+  const monday = new Date();
+  const diff = (monday.getDay() + 6) % 7;
+  monday.setDate(monday.getDate() - diff + offset * 7);
+  const kw = getISOWeek(monday);
+  return `KW ${kw} ${monday.getFullYear()}`;
+}
+
+function getISOWeek(date: Date): number {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+}
+
 export default function ProfilScreen() {
-  const { score, streak, totalWaterMl, weeklyMl } = useWater();
+  const { score, streak, totalWaterMl, weeklyMl, fetchHistoricalWeek } = useWater();
   const { session, signOut } = useAuth();
 
   const [chartModal, setChartModal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<DayData | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [histWeekMl, setHistWeekMl] = useState<number[] | null>(null);
+  const [isLoadingWeek, setIsLoadingWeek] = useState(false);
 
   const levelInfo = getLevel(score);
   const xpPct = Math.min(levelInfo.currentXp / levelInfo.neededXp, 1);
@@ -164,11 +185,22 @@ export default function ProfilScreen() {
   const totalLiters = (totalWaterMl / 1000).toFixed(1);
 
   const todayDayIdx = (new Date().getDay() + 6) % 7;
+
+  // Aktuelle Woche (Karte + Vorschau)
   const weekData: DayData[] = weeklyMl.map((ml, i) => ({
     label: DAY_LABELS[i],
     ml: i > todayDayIdx ? 0 : ml,
     isFuture: i > todayDayIdx,
     isToday: i === todayDayIdx,
+  }));
+
+  // Modal-Daten: historisch oder aktuell
+  const modalMl = weekOffset === 0 ? weeklyMl : (histWeekMl ?? new Array(7).fill(0));
+  const modalWeekData: DayData[] = modalMl.map((ml, i) => ({
+    label: DAY_LABELS[i],
+    ml: weekOffset === 0 ? (i > todayDayIdx ? 0 : ml) : ml,
+    isFuture: weekOffset === 0 ? i > todayDayIdx : false,
+    isToday: weekOffset === 0 ? i === todayDayIdx : false,
   }));
 
   const nonFuture = weekData.filter((d) => !d.isFuture);
@@ -177,6 +209,27 @@ export default function ProfilScreen() {
       ? Math.round(nonFuture.reduce((s, d) => s + d.ml, 0) / nonFuture.length)
       : 0;
   const maxMl = Math.max(...weekData.map((d) => d.ml), 500);
+
+  const modalNonFuture = modalWeekData.filter((d) => !d.isFuture);
+  const modalAvgMl =
+    modalNonFuture.length > 0
+      ? Math.round(modalNonFuture.reduce((s, d) => s + d.ml, 0) / modalNonFuture.length)
+      : 0;
+  const modalMaxMl = Math.max(...modalWeekData.map((d) => d.ml), 500);
+
+  useEffect(() => {
+    if (!chartModal) return;
+    if (weekOffset === 0) {
+      setHistWeekMl(null);
+      return;
+    }
+    setIsLoadingWeek(true);
+    setSelectedDay(null);
+    fetchHistoricalWeek(weekOffset)
+      .then(setHistWeekMl)
+      .catch(() => setHistWeekMl(new Array(7).fill(0)))
+      .finally(() => setIsLoadingWeek(false));
+  }, [weekOffset, chartModal, fetchHistoricalWeek]);
 
   async function handleSignOut() {
     try {
@@ -258,6 +311,8 @@ export default function ProfilScreen() {
           style={styles.weeklyCard}
           onPress={() => {
             setSelectedDay(null);
+            setWeekOffset(0);
+            setHistWeekMl(null);
             setChartModal(true);
           }}
           activeOpacity={0.85}>
@@ -287,9 +342,27 @@ export default function ProfilScreen() {
           <View style={styles.modalBox}>
             {/* Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Diese Woche</Text>
+              <Text style={styles.modalTitle}>{getWeekLabel(weekOffset)}</Text>
               <TouchableOpacity onPress={() => setChartModal(false)} style={styles.modalClose}>
                 <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Wochen-Navigation */}
+            <View style={styles.weekNav}>
+              <TouchableOpacity
+                style={styles.weekNavBtn}
+                onPress={() => { setWeekOffset((o) => o - 1); setSelectedDay(null); }}>
+                <Text style={styles.weekNavArrow}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.weekNavLabel}>{getWeekLabel(weekOffset)}</Text>
+              <TouchableOpacity
+                style={[styles.weekNavBtn, weekOffset === 0 && styles.weekNavBtnDisabled]}
+                onPress={() => {
+                  if (weekOffset < 0) { setWeekOffset((o) => o + 1); setSelectedDay(null); }
+                }}
+                disabled={weekOffset === 0}>
+                <Text style={[styles.weekNavArrow, weekOffset === 0 && styles.weekNavArrowDisabled]}>›</Text>
               </TouchableOpacity>
             </View>
 
@@ -298,17 +371,23 @@ export default function ProfilScreen() {
               <View style={styles.modalAvgDash}>
                 <DashedLine color={Brand.warning} />
               </View>
-              <Text style={styles.modalAvgText}>Wochendurchschnitt: {avgMl} ml/Tag</Text>
+              <Text style={styles.modalAvgText}>Wochendurchschnitt: {modalAvgMl} ml/Tag</Text>
             </View>
 
             {/* Großer Graph */}
-            <WeekChart
-              data={weekData}
-              chartH={180}
-              maxMl={maxMl}
-              avgMl={avgMl}
-              onBarPress={setSelectedDay}
-            />
+            {isLoadingWeek ? (
+              <View style={{ height: 180 + 26, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={styles.tapHintModal}>Lade Daten…</Text>
+              </View>
+            ) : (
+              <WeekChart
+                data={modalWeekData}
+                chartH={180}
+                maxMl={modalMaxMl}
+                avgMl={modalAvgMl}
+                onBarPress={setSelectedDay}
+              />
+            )}
 
             {/* Tages-Detail */}
             {selectedDay ? (
@@ -481,6 +560,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalCloseText: { fontSize: 14, fontWeight: '700', color: Brand.textMuted },
+
+  weekNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    backgroundColor: Brand.surface,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: Brand.border,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  weekNavBtn: {
+    width: 40,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  weekNavBtnDisabled: { opacity: 0.3 },
+  weekNavArrow: { fontSize: 26, fontWeight: '700', color: Brand.primary, lineHeight: 30 },
+  weekNavArrowDisabled: { color: Brand.textMuted },
+  weekNavLabel: { fontSize: 13, fontWeight: '800', color: Brand.text },
 
   modalAvgRow: {
     flexDirection: 'row',

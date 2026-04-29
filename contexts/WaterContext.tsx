@@ -48,6 +48,7 @@ type WaterState = {
   weeklyMl: number[]; // 7 Werte: Mo=0 … So=6
   addLog: (name: string, emoji: string, ml: number, waterMl: number, time: string) => Promise<void>;
   dismissSuccess: () => void;
+  fetchHistoricalWeek: (weekOffset: number) => Promise<number[]>;
 };
 
 // ─── Hilfsfunktionen ──────────────────────────────────────────────────
@@ -260,6 +261,38 @@ export function WaterProvider({ children }: { children: ReactNode }) {
     setWeeklyMl(daily);
   }
 
+  // ─── Historische Wochendaten (weekOffset: 0=aktuell, -1=letzte Woche, …) ──
+  const fetchHistoricalWeek = useCallback(async (weekOffset: number): Promise<number[]> => {
+    if (!userId) return new Array(7).fill(0);
+
+    const monday = new Date();
+    const diff = (monday.getDay() + 6) % 7;
+    monday.setDate(monday.getDate() - diff + weekOffset * 7);
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(sunday.getDate() + 7);
+
+    const { data, error } = await supabase
+      .from('Getränke')
+      .select('menge_ml, uhrzeit, artid')
+      .eq('userid', userId)
+      .gte('uhrzeit', monday.toISOString())
+      .lt('uhrzeit', sunday.toISOString());
+
+    if (error) throw error;
+
+    const daily = new Array(7).fill(0);
+    for (const row of data ?? []) {
+      const date = new Date(row.uhrzeit);
+      const dayIdx = (date.getDay() + 6) % 7;
+      const name = artNameById.current.get(row.artid) ?? 'Wasser';
+      const meta = getDrinkMeta(name);
+      daily[dayIdx] += Math.round(row.menge_ml * meta.factor);
+    }
+    return daily;
+  }, [userId]);
+
   // ─── addLog ───────────────────────────────────────────────────────
   const addLog = useCallback(
     async (name: string, emoji: string, ml: number, waterMl: number, time: string) => {
@@ -353,8 +386,9 @@ export function WaterProvider({ children }: { children: ReactNode }) {
       weeklyMl,
       addLog,
       dismissSuccess,
+      fetchHistoricalWeek,
     }),
-    [logs, totalWaterMl, streak, score, goalReached, showSuccess, isLoading, weeklyMl, addLog, dismissSuccess],
+    [logs, totalWaterMl, streak, score, goalReached, showSuccess, isLoading, weeklyMl, addLog, dismissSuccess, fetchHistoricalWeek],
   );
 
   return <WaterContext.Provider value={value}>{children}</WaterContext.Provider>;

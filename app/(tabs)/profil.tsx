@@ -445,7 +445,9 @@ export default function ProfilScreen() {
                   <Text style={styles.dayDetailGoal}>
                     {selectedDay.ml >= GOAL
                       ? '✓ Tagesziel erreicht'
-                      : `Noch ${GOAL - selectedDay.ml} ml bis zum Ziel`}
+                      : selectedDay.isToday
+                        ? `Noch ${GOAL - selectedDay.ml} ml bis zum Ziel`
+                        : 'Ziel nicht erreicht'}
                   </Text>
                 )}
               </View>

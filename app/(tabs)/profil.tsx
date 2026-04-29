@@ -1,11 +1,12 @@
 import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Brand } from '@/constants/brand';
-import { useWater } from '@/contexts/WaterContext';
+import { useWater, DRINK_TYPES } from '@/contexts/WaterContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 const LEVEL_THRESHOLDS = [
   { level: 1, name: 'Wassertropfen', xpNeeded: 100 },
@@ -70,7 +71,6 @@ function WeekChart({
   return (
     <View>
       <View style={{ height: chartH, position: 'relative' }}>
-        {/* Balken */}
         <View
           style={{
             flexDirection: 'row',
@@ -112,7 +112,6 @@ function WeekChart({
           })}
         </View>
 
-        {/* Gestrichelte Durchschnitts-Linie */}
         {avgMl > 0 && (
           <View
             style={{
@@ -129,7 +128,6 @@ function WeekChart({
         )}
       </View>
 
-      {/* Tagesbeschriftungen */}
       <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
         {data.map((day) => (
           <Text
@@ -149,12 +147,81 @@ function WeekChart({
   );
 }
 
+function getWeekStart(offset: number): string {
+  const d = new Date();
+  const diff = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - diff + offset * 7);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function getWeekLabel(offset: number): string {
+  if (offset === 0) return 'DIESE WOCHE';
+  if (offset === -1) return 'LETZTE WOCHE';
+  const d = new Date();
+  const diff = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - diff + offset * 7);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `WOCHE VOM ${day}.${month}.`;
+}
+
 export default function ProfilScreen() {
   const { score, streak, totalWaterMl, weeklyMl } = useWater();
   const { session, signOut } = useAuth();
 
+  const userId = session?.user?.id ?? null;
+
   const [chartModal, setChartModal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<DayData | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [historicWeeklyMl, setHistoricWeeklyMl] = useState<number[] | null>(null);
+  const [isLoadingWeek, setIsLoadingWeek] = useState(false);
+  const [artMap, setArtMap] = useState<Map<number, string>>(new Map());
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from('Getränkearten')
+      .select('id, name')
+      .eq('userid', userId)
+      .then(({ data }) => {
+        const map = new Map<number, string>();
+        for (const row of data ?? []) map.set(row.id, row.name);
+        setArtMap(map);
+      });
+  }, [userId]);
+
+  useEffect(() => {
+    if (weekOffset === 0) {
+      setHistoricWeeklyMl(null);
+      return;
+    }
+    if (!userId || artMap.size === 0) return;
+
+    setIsLoadingWeek(true);
+    const from = getWeekStart(weekOffset);
+    const to = getWeekStart(weekOffset + 1);
+
+    supabase
+      .from('Getränke')
+      .select('menge_ml, uhrzeit, artid')
+      .eq('userid', userId)
+      .gte('uhrzeit', from)
+      .lt('uhrzeit', to)
+      .then(({ data }) => {
+        const daily = new Array(7).fill(0);
+        for (const row of data ?? []) {
+          const date = new Date(row.uhrzeit);
+          const dayIdx = (date.getDay() + 6) % 7;
+          const name = artMap.get(row.artid) ?? 'Wasser';
+          const meta = DRINK_TYPES.find((d) => d.name === name) ?? DRINK_TYPES[0];
+          daily[dayIdx] += Math.round(row.menge_ml * meta.factor);
+        }
+        setHistoricWeeklyMl(daily);
+        setIsLoadingWeek(false);
+      });
+  }, [weekOffset, userId, artMap]);
 
   const levelInfo = getLevel(score);
   const xpPct = Math.min(levelInfo.currentXp / levelInfo.neededXp, 1);
@@ -164,11 +231,13 @@ export default function ProfilScreen() {
   const totalLiters = (totalWaterMl / 1000).toFixed(1);
 
   const todayDayIdx = (new Date().getDay() + 6) % 7;
-  const weekData: DayData[] = weeklyMl.map((ml, i) => ({
+  const displayWeeklyMl = weekOffset === 0 ? weeklyMl : (historicWeeklyMl ?? new Array(7).fill(0));
+
+  const weekData: DayData[] = displayWeeklyMl.map((ml, i) => ({
     label: DAY_LABELS[i],
-    ml: i > todayDayIdx ? 0 : ml,
-    isFuture: i > todayDayIdx,
-    isToday: i === todayDayIdx,
+    ml: weekOffset === 0 ? (i > todayDayIdx ? 0 : ml) : ml,
+    isFuture: weekOffset === 0 && i > todayDayIdx,
+    isToday: weekOffset === 0 && i === todayDayIdx,
   }));
 
   const nonFuture = weekData.filter((d) => !d.isFuture);
@@ -253,7 +322,7 @@ export default function ProfilScreen() {
           </View>
         </View>
 
-        {/* Wochen-Graph (antippbar) */}
+        {/* Wochen-Graph */}
         <TouchableOpacity
           style={styles.weeklyCard}
           onPress={() => {
@@ -261,8 +330,28 @@ export default function ProfilScreen() {
             setChartModal(true);
           }}
           activeOpacity={0.85}>
+          {/* Wochen-Navigation */}
           <View style={styles.weeklyCardHeader}>
-            <Text style={styles.weeklyTitle}>DIESE WOCHE</Text>
+            <View style={styles.weekNavRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  setWeekOffset((o) => o - 1);
+                  setSelectedDay(null);
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={styles.weekNavArrow}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.weeklyTitle}>{getWeekLabel(weekOffset)}</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setWeekOffset((o) => o + 1);
+                  setSelectedDay(null);
+                }}
+                disabled={weekOffset === 0}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={[styles.weekNavArrow, weekOffset === 0 && styles.weekNavArrowDisabled]}>›</Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.avgLegend}>
               <View style={styles.avgDashSample}>
                 <DashedLine color={Brand.warning} />
@@ -270,7 +359,13 @@ export default function ProfilScreen() {
               <Text style={styles.avgLegendText}>⌀ {avgMl} ml</Text>
             </View>
           </View>
-          <WeekChart data={weekData} chartH={80} maxMl={maxMl} avgMl={avgMl} />
+          {isLoadingWeek ? (
+            <View style={{ height: 80, justifyContent: 'center', alignItems: 'center' }}>
+              <Text style={{ color: Brand.textMuted, fontSize: 12, fontWeight: '600' }}>Lädt...</Text>
+            </View>
+          ) : (
+            <WeekChart data={weekData} chartH={80} maxMl={maxMl} avgMl={avgMl} />
+          )}
           <Text style={styles.tapHint}>Tippen für Detailansicht →</Text>
         </TouchableOpacity>
 
@@ -287,7 +382,26 @@ export default function ProfilScreen() {
           <View style={styles.modalBox}>
             {/* Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Diese Woche</Text>
+              <View style={styles.modalTitleRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setWeekOffset((o) => o - 1);
+                    setSelectedDay(null);
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={styles.modalNavArrow}>‹</Text>
+                </TouchableOpacity>
+                <Text style={styles.modalTitle}>{getWeekLabel(weekOffset)}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setWeekOffset((o) => o + 1);
+                    setSelectedDay(null);
+                  }}
+                  disabled={weekOffset === 0}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={[styles.modalNavArrow, weekOffset === 0 && styles.weekNavArrowDisabled]}>›</Text>
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity onPress={() => setChartModal(false)} style={styles.modalClose}>
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
@@ -302,13 +416,19 @@ export default function ProfilScreen() {
             </View>
 
             {/* Großer Graph */}
-            <WeekChart
-              data={weekData}
-              chartH={180}
-              maxMl={maxMl}
-              avgMl={avgMl}
-              onBarPress={setSelectedDay}
-            />
+            {isLoadingWeek ? (
+              <View style={{ height: 180, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ color: Brand.textMuted, fontSize: 13, fontWeight: '600' }}>Lädt...</Text>
+              </View>
+            ) : (
+              <WeekChart
+                data={weekData}
+                chartH={180}
+                maxMl={maxMl}
+                avgMl={avgMl}
+                onBarPress={setSelectedDay}
+              />
+            )}
 
             {/* Tages-Detail */}
             {selectedDay ? (
@@ -432,12 +552,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 14,
   },
+  weekNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   weeklyTitle: {
     fontSize: 11,
     fontWeight: '800',
     color: Brand.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
+  },
+  weekNavArrow: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: Brand.primary,
+    lineHeight: 26,
+  },
+  weekNavArrowDisabled: {
+    color: Brand.border,
   },
   avgLegend: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   avgDashSample: { width: 20, overflow: 'hidden', height: 2 },
@@ -469,7 +603,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: Brand.text },
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '900', color: Brand.text },
+  modalNavArrow: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: Brand.primary,
+    lineHeight: 30,
+  },
   modalClose: {
     width: 34,
     height: 34,
